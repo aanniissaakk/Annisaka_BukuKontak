@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 void main() {
@@ -34,6 +35,14 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   // Menyimpan data kontak
   List<Kontak> items = [];
+
+  final StreamController<String> _searchController = StreamController<String>();
+
+  @override
+  void dispose() {
+    _searchController.close();
+    super.dispose();
+  }
 
   // FUNGSI UNTUK MEMBUKA HALAMAN TAMBAH KONTAK
   Future<void> tambahKontak() async {
@@ -147,10 +156,47 @@ class _MyHomePageState extends State<MyHomePage> {
       body: TabBarView(
         children: [
           // TAB KONTAK
-          daftarKontak(),
+          Column(
+            children: [
+              // TEXT FIELD PENCARIAN
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: TextField(
+                  onChanged: (teks) {
+                    _searchController.add(teks);
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'Cari kontak...',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+
+              // HASIL PENCARIAN
+              Expanded(
+                child: StreamBuilder<String>(
+                  stream: _searchController.stream,
+                  builder: (context, snapshot) {
+                    String keyword = (snapshot.data ?? '').toLowerCase();
+
+                    List<Kontak> hasilFilter = items.where((k) {
+                      String nama = k.nama.toLowerCase();
+                      String kategori = (k.kategori ?? '').toLowerCase();
+
+                      return nama.contains(keyword) ||
+                          kategori.contains(keyword);
+                    }).toList();
+
+                    return daftarKontak(hasilFilter);
+                  },
+                ),
+              ),
+            ],
+          ),
 
           // TAB FAVORIT
-            ListTile(
+          ListTile(
             leading: const Icon(Icons.person),
             title: const Text('Annisa Kusumastuti'),
             subtitle: const Text(
@@ -172,8 +218,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // WIDGET DAFTAR KONTAK
-  Widget daftarKontak() {
-    if (items.isEmpty) {
+  Widget daftarKontak(List<Kontak> daftar) {
+    if (daftar.isEmpty) {
       return const Center(
         child: Text(
           'Belum ada kontak',
@@ -183,16 +229,19 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     return ListView.builder(
-      itemCount: items.length,
+      itemCount: daftar.length,
       itemBuilder: (context, index) {
         return ListTile(
-          leading: const Icon(Icons.person),
+          leading: CircleAvatar(
+            child: Text(daftar[index].inisial),
+          ),
           title: Text(
-            items[index].nama,
+            daftar[index].nama,
           ),
           subtitle: Text(
-            '${items[index].email}\n'
-            '${items[index].noHandphone}',
+            '${daftar[index].email}\n'
+            '${daftar[index].noHandphone}\n'
+            '${daftar[index].kategori ?? "Tanpa kategori"}',
           ),
         );
       },
@@ -216,11 +265,15 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
 
   final TextEditingController noHandphoneController = TextEditingController();
 
+  final TextEditingController kategoriController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
   @override
   void dispose() {
     namaController.dispose();
     emailController.dispose();
     noHandphoneController.dispose();
+    kategoriController.dispose();
     super.dispose();
   }
 
@@ -231,6 +284,8 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
       nama: namaController.text,
       email: emailController.text,
       noHandphone: noHandphoneController.text,
+      kategori:
+          kategoriController.text.isEmpty ? null : kategoriController.text,
     );
 
     // Mengirim data kontak kembali ke halaman sebelumnya
@@ -247,47 +302,91 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            // NAMA
-            TextField(
-              controller: namaController,
-              decoration: const InputDecoration(
-                labelText: 'Nama Lengkap',
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              // NAMA
+              TextFormField(
+                controller: namaController,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Lengkap',
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Nama tidak boleh kosong';
+                  }
+                  return null;
+                },
               ),
-            ),
 
-            const SizedBox(height: 15),
+              const SizedBox(height: 15),
 
-            // EMAIL
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: 'Email',
+              // EMAIL
+              TextFormField(
+                controller: emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Email tidak boleh kosong';
+                  }
+                  if (!value.contains('@')) {
+                    return 'Email harus menggunakan @';
+                  }
+                  return null;
+                },
               ),
-            ),
 
-            const SizedBox(height: 15),
+              const SizedBox(height: 15),
 
-            // NOMOR HANDPHONE
-            TextField(
-              controller: noHandphoneController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'No Handphone',
+              // NOMOR HANDPHONE
+              TextFormField(
+                controller: noHandphoneController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'No Handphone',
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'No HP wajib diisi';
+                  }
+
+                  if (!RegExp(r'^[0-9]+$').hasMatch(value)) {
+                    return 'No HP hanya boleh angka';
+                  }
+
+                  if (value.length < 10) {
+                    return 'No HP minimal 10 digit';
+                  }
+
+                  return null;
+                },
               ),
-            ),
 
-            const SizedBox(height: 20),
+              const SizedBox(height: 15),
 
-            // TOMBOL SIMPAN
-            ElevatedButton(
-              onPressed: () {
-                simpanKontak();
-              },
-              child: const Text('Simpan'),
-            ),
-          ],
+              TextField(
+                controller: kategoriController,
+                decoration: const InputDecoration(
+                  labelText: 'Kategori',
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // TOMBOL SIMPAN
+              ElevatedButton(
+                onPressed: () {
+                  if (_formKey.currentState!.validate()) {
+                    simpanKontak();
+                  }
+                },
+                child: const Text('Simpan'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -345,10 +444,13 @@ class Kontak {
   String nama;
   String email;
   String noHandphone;
+  String? kategori;
 
   Kontak({
     required this.nama,
     required this.email,
     required this.noHandphone,
+    this.kategori,
   });
+  String get inisial => nama.isNotEmpty ? nama[0].toUpperCase() : '?';
 }
