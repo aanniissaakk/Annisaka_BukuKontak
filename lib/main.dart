@@ -1,7 +1,16 @@
 import 'dart:async';
+import 'package:material_design/firebase_options.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const MyApp());
 }
 
@@ -36,7 +45,8 @@ class _MyHomePageState extends State<MyHomePage> {
   // Menyimpan data kontak
   List<Kontak> items = [];
 
-  final StreamController<String> _searchController = StreamController<String>();
+  final StreamController<String> _searchController =
+      StreamController<String>.broadcast();
 
   @override
   void dispose() {
@@ -59,6 +69,57 @@ class _MyHomePageState extends State<MyHomePage> {
         items.add(hasil);
       });
       DefaultTabController.of(context).animateTo(0);
+    }
+  }
+
+  Future<void> editKontak(int index) async {
+    final hasil = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TambahKontakPage(
+          kontak: items[index],
+        ),
+      ),
+    );
+    if (hasil != null) {
+      setState(() {
+        items[index] = hasil;
+      });
+    }
+  }
+
+  Future<void> hapusKontak(int index) async {
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Hapus Kontak'),
+          content: Text(
+            'Apakah Anda yakin ingin menghapus kontak '
+            '${items[index].nama}?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text('Batal'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (konfirmasi == true) {
+      setState(() {
+        items.removeAt(index);
+      });
     }
   }
 
@@ -174,21 +235,82 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
 
               // HASIL PENCARIAN
+
+              // child: StreamBuilder<String>(
+              //   stream: _searchController.stream,
+              //   builder: (context, snapshot) {
+              //     String keyword = (snapshot.data ?? '').toLowerCase();
+
+              //     List<Kontak> hasilFilter = items.where((k) {
+              //       String nama = k.nama.toLowerCase();
+              //       String kategori = (k.kategori ?? '').toLowerCase();
+
+              //       return nama.contains(keyword) ||
+              //           kategori.contains(keyword);
+              //     }).toList();
+
+              //     return daftarKontak(hasilFilter);
+              //   },
+              // ),
               Expanded(
-                child: StreamBuilder<String>(
-                  stream: _searchController.stream,
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('kontak')
+                      .snapshots(),
                   builder: (context, snapshot) {
-                    String keyword = (snapshot.data ?? '').toLowerCase();
+                    // Loading
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: CircularProgressIndicator(),
+                      );
+                    }
 
-                    List<Kontak> hasilFilter = items.where((k) {
-                      String nama = k.nama.toLowerCase();
-                      String kategori = (k.kategori ?? '').toLowerCase();
+                    // Error
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Text(
+                          'Terjadi kesalahan: ${snapshot.error}',
+                        ),
+                      );
+                    }
 
-                      return nama.contains(keyword) ||
-                          kategori.contains(keyword);
-                    }).toList();
+                    // Stream pencarian
+                    return StreamBuilder<String>(
+                      stream: _searchController.stream,
+                      initialData: '',
+                      builder: (context, searchSnapshot) {
+                        final keyword =
+                            (searchSnapshot.data ?? '').toLowerCase();
 
-                    return daftarKontak(hasilFilter);
+                        // Ambil data Firestore
+                        final daftarKontakFirestore =
+                            snapshot.data!.docs.map((doc) {
+                          final data = doc.data();
+
+                          return Kontak(
+                            id: doc.id,
+                            nama: data['nama'] ?? '',
+                            email: data['email'] ?? '',
+                            noHandphone: data['noHandphone'] ?? '',
+                            kategori: data['kategori'],
+                          );
+                        }).toList();
+
+                        // Filter
+                        final hasilFilter =
+                            daftarKontakFirestore.where((kontak) {
+                          final nama = kontak.nama.toLowerCase();
+
+                          final kategori =
+                              (kontak.kategori ?? '').toLowerCase();
+
+                          return nama.contains(keyword) ||
+                              kategori.contains(keyword);
+                        }).toList();
+
+                        return daftarKontak(hasilFilter);
+                      },
+                    );
                   },
                 ),
               ),
@@ -231,17 +353,43 @@ class _MyHomePageState extends State<MyHomePage> {
     return ListView.builder(
       itemCount: daftar.length,
       itemBuilder: (context, index) {
-        return ListTile(
-          leading: CircleAvatar(
-            child: Text(daftar[index].inisial),
+        return Card(
+          margin: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 5,
           ),
-          title: Text(
-            daftar[index].nama,
-          ),
-          subtitle: Text(
-            '${daftar[index].email}\n'
-            '${daftar[index].noHandphone}\n'
-            '${daftar[index].kategori ?? "Tanpa kategori"}',
+          elevation: 2,
+          child: ListTile(
+            leading: CircleAvatar(
+              child: Text(daftar[index].inisial),
+            ),
+            title: Text(
+              daftar[index].nama,
+            ),
+            subtitle: Text(
+              '${daftar[index].email}\n'
+              '${daftar[index].noHandphone}\n'
+              '${daftar[index].kategori ?? "Tanpa kategori"}',
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () {
+                    int posisiAsli = items.indexOf(daftar[index]);
+                    editKontak(posisiAsli);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: () {
+                    int posisiAsli = items.indexOf(daftar[index]);
+                    hapusKontak(posisiAsli);
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -251,7 +399,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
 // HALAMAN TAMBAH KONTAK
 class TambahKontakPage extends StatefulWidget {
-  const TambahKontakPage({super.key});
+  final Kontak? kontak;
+  const TambahKontakPage({
+    super.key,
+    this.kontak,
+  });
 
   @override
   State<TambahKontakPage> createState() => _TambahKontakPageState();
@@ -269,6 +421,17 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
   final _formKey = GlobalKey<FormState>();
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.kontak != null) {
+      namaController.text = widget.kontak!.nama;
+      emailController.text = widget.kontak!.email;
+      noHandphoneController.text = widget.kontak!.noHandphone;
+      kategoriController.text = widget.kontak!.kategori ?? '';
+    }
+  }
+
+  @override
   void dispose() {
     namaController.dispose();
     emailController.dispose();
@@ -278,18 +441,47 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
   }
 
   // FUNGSI SIMPAN KONTAK
-  void simpanKontak() {
-    // Membuat objek kontak dari input
-    Kontak kontak = Kontak(
-      nama: namaController.text,
-      email: emailController.text,
-      noHandphone: noHandphoneController.text,
-      kategori:
-          kategoriController.text.isEmpty ? null : kategoriController.text,
-    );
+  // void simpanKontak() {
+  //   Kontak kontak = Kontak(
+  //     nama: namaController.text,
+  //     email: emailController.text,
+  //     noHandphone: noHandphoneController.text,
+  //     kategori:
+  //         kategoriController.text.isEmpty ? null : kategoriController.text,
+  //   );
 
-    // Mengirim data kontak kembali ke halaman sebelumnya
-    Navigator.pop(context, kontak);
+  //   // Mengirim data kontak kembali ke halaman sebelumnya
+  //   Navigator.pop(context, kontak);
+  // }
+
+  Future<void> simpanKontak() async {
+    try {
+      await FirebaseFirestore.instance.collection('kontak').add({
+        'nama': namaController.text,
+        'email': emailController.text,
+        'noHandphone': noHandphoneController.text,
+        'kategori':
+            kategoriController.text.isEmpty ? null : kategoriController.text,
+      });
+
+      // Bersihkan form
+      namaController.clear();
+      emailController.clear();
+      noHandphoneController.clear();
+      kategoriController.clear();
+
+      // Tampilkan SnackBar
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data berhasil disimpan'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal menyimpan kontak: $e')),
+      );
+    }
   }
 
   @override
@@ -298,7 +490,7 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
       appBar: AppBar(
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
-        title: const Text('Tambah Kontak'),
+        title: Text(widget.kontak == null ? 'Tambah Kontak' : 'Edit Kontak'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -383,7 +575,9 @@ class _TambahKontakPageState extends State<TambahKontakPage> {
                     simpanKontak();
                   }
                 },
-                child: const Text('Simpan'),
+                child: Text(widget.kontak == null
+                    ? 'Simpan Kontak'
+                    : 'Simpan Perubahan'),
               ),
             ],
           ),
@@ -441,16 +635,19 @@ class TentangPage extends StatelessWidget {
 
 // CLASS KONTAK
 class Kontak {
+  String id;
   String nama;
   String email;
   String noHandphone;
   String? kategori;
 
   Kontak({
+    this.id = '',
     required this.nama,
     required this.email,
     required this.noHandphone,
     this.kategori,
   });
+
   String get inisial => nama.isNotEmpty ? nama[0].toUpperCase() : '?';
 }
